@@ -73,7 +73,7 @@ func changed(
 ) bool {
 	neighbors, err := getNeighbors()
 	if err != nil {
-		log.Errorf("network monitor: error fetching current neighbors: %v", err)
+		log.Warnf("Network monitor: error fetching current neighbors: %v", err)
 		return false
 	}
 	if neighborChanged(nexthopv4, neighborv4, neighbors) || neighborChanged(nexthopv6, neighborv6, neighbors) {
@@ -82,7 +82,7 @@ func changed(
 
 	routes, err := getRoutes()
 	if err != nil {
-		log.Errorf("network monitor: error fetching current routes: %v", err)
+		log.Warnf("Network monitor: error fetching current routes: %v", err)
 		return false
 	}
 
@@ -102,7 +102,7 @@ func routeChanged(nexthop systemops.Nexthop, intf *net.Interface, routes []syste
 	unspec := getUnspecifiedPrefix(nexthop.IP)
 	defaultRoutes, foundMatchingRoute := processRoutes(nexthop, intf, routes, unspec)
 
-	log.Tracef("network monitor: all default routes:\n%s", strings.Join(defaultRoutes, "\n"))
+	log.Tracef("Network monitor: all default routes:\n%s", strings.Join(defaultRoutes, "\n"))
 
 	if !foundMatchingRoute {
 		logRouteChange(nexthop.IP, intf)
@@ -130,7 +130,7 @@ func processRoutes(nexthop systemops.Nexthop, intf *net.Interface, routes []syst
 
 			if r.Nexthop == nexthop.IP && compareIntf(r.Interface, intf) == 0 {
 				foundMatchingRoute = true
-				log.Debugf("network monitor: found matching default route: %s", routeInfo)
+				log.Debugf("Network monitor: found matching default route: %s", routeInfo)
 			}
 		}
 	}
@@ -151,7 +151,7 @@ func logRouteChange(ip netip.Addr, intf *net.Interface) {
 	if intf != nil {
 		oldIntf = intf.Name
 	}
-	log.Infof("network monitor: default route for %s (%s) is gone or changed", ip, oldIntf)
+	log.Infof("Network monitor: default route for %s (%s) is gone or changed", ip, oldIntf)
 }
 
 func neighborChanged(nexthop systemops.Nexthop, neighbor *systemops.Neighbor, neighbors map[netip.Addr]systemops.Neighbor) bool {
@@ -162,11 +162,11 @@ func neighborChanged(nexthop systemops.Nexthop, neighbor *systemops.Neighbor, ne
 	// TODO: consider non-local nexthops, e.g. on point-to-point interfaces
 	if n, ok := neighbors[nexthop.IP]; ok {
 		if n.State == unreachable || n.State == incomplete {
-			log.Infof("network monitor: neighbor %s (%s) is not reachable: %s", neighbor.IPAddress, neighbor.LinkLayerAddress, stateFromInt(n.State))
+			log.Infof("Network monitor: neighbor %s (%s) is not reachable: %s", neighbor.IPAddress, neighbor.LinkLayerAddress, stateFromInt(n.State))
 			return true
 		} else if n.InterfaceIndex != neighbor.InterfaceIndex {
 			log.Infof(
-				"network monitor: neighbor %s (%s) changed interface from '%s' (%d) to '%s' (%d): %s",
+				"Network monitor: neighbor %s (%s) changed interface from '%s' (%d) to '%s' (%d): %s",
 				neighbor.IPAddress,
 				neighbor.LinkLayerAddress,
 				neighbor.InterfaceAlias,
@@ -178,7 +178,7 @@ func neighborChanged(nexthop systemops.Nexthop, neighbor *systemops.Neighbor, ne
 			return true
 		}
 	} else {
-		log.Infof("network monitor: neighbor %s (%s) is gone", neighbor.IPAddress, neighbor.LinkLayerAddress)
+		log.Infof("Network monitor: neighbor %s (%s) is gone", neighbor.IPAddress, neighbor.LinkLayerAddress)
 		return true
 	}
 
