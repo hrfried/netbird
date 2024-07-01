@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -33,6 +34,7 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 	}
 
 	// Keep track of interface states
+	var stateMutex sync.RWMutex
 	interfaceStates := make(map[int32]bool)
 
 	log.Info("Network monitor: started")
@@ -54,10 +56,16 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 				return nil
 			case syscall.RTM_NEWLINK:
 				isUp := (update.IfInfomsg.Flags&syscall.IFF_RUNNING) != 0 && update.Link.Attrs().OperState != netlink.OperDown
+
+				stateMutex.RLock()
 				prevState, exists := interfaceStates[update.Index]
+				stateMutex.RUnlock()
 
 				if !exists || prevState != isUp {
+					stateMutex.Lock()
 					interfaceStates[update.Index] = isUp
+					stateMutex.Unlock()
+
 					if !isUp {
 						log.Infof("Network monitor: monitored interface (%s) is down.", update.Link.Attrs().Name)
 						go callback()
