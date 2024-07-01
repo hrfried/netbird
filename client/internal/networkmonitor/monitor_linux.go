@@ -15,6 +15,37 @@ import (
 	"github.com/netbirdio/netbird/client/internal/routemanager/systemops"
 )
 
+type interfaceMonitor struct {
+	stateMutex      sync.RWMutex
+	interfaceStates map[int32]bool
+}
+
+func newInterfaceMonitor() *interfaceMonitor {
+	return &interfaceMonitor{
+		interfaceStates: make(map[int32]bool),
+	}
+}
+
+func (im *interfaceMonitor) handleNewLink(update netlink.LinkUpdate) (bool, error) {
+	isUp := (update.IfInfomsg.Flags&syscall.IFF_RUNNING) != 0 && update.Link.Attrs().OperState != netlink.OperDown
+
+	im.stateMutex.RLock()
+	prevState, exists := im.interfaceStates[update.Index]
+	im.stateMutex.RUnlock()
+
+	if !exists || prevState != isUp {
+		im.stateMutex.Lock()
+		im.interfaceStates[update.Index] = isUp
+		im.stateMutex.Unlock()
+
+		if !isUp {
+			log.Infof("Network monitor: monitored interface (%s) is down.", update.Link.Attrs().Name)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, callback func()) error {
 	if nexthopv4.Intf == nil && nexthopv6.Intf == nil {
 		return errors.New("no interfaces available")
@@ -33,17 +64,13 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 		return fmt.Errorf("subscribe to route updates: %v", err)
 	}
 
-	// Keep track of interface states
-	var stateMutex sync.RWMutex
-	interfaceStates := make(map[int32]bool)
-
+	im := newInterfaceMonitor()
 	log.Info("Network monitor: started")
 	for {
 		select {
 		case <-ctx.Done():
 			return ErrStopped
 
-		// handle interface state changes
 		case update := <-linkChan:
 			if (nexthopv4.Intf == nil || update.Index != int32(nexthopv4.Intf.Index)) && (nexthopv6.Intf == nil || update.Index != int32(nexthopv6.Intf.Index)) {
 				continue
@@ -55,22 +82,11 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 				go callback()
 				return nil
 			case syscall.RTM_NEWLINK:
-				isUp := (update.IfInfomsg.Flags&syscall.IFF_RUNNING) != 0 && update.Link.Attrs().OperState != netlink.OperDown
-
-				stateMutex.RLock()
-				prevState, exists := interfaceStates[update.Index]
-				stateMutex.RUnlock()
-
-				if !exists || prevState != isUp {
-					stateMutex.Lock()
-					interfaceStates[update.Index] = isUp
-					stateMutex.Unlock()
-
-					if !isUp {
-						log.Infof("Network monitor: monitored interface (%s) is down.", update.Link.Attrs().Name)
-						go callback()
-						return nil
-					}
+				if shouldCallback, err := im.handleNewLink(update); err != nil {
+					return err
+				} else if shouldCallback {
+					go callback()
+					return nil
 				}
 			}
 
