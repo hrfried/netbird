@@ -32,6 +32,9 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 		return fmt.Errorf("subscribe to route updates: %v", err)
 	}
 
+	// Keep track of interface states
+	interfaceStates := make(map[int32]bool)
+
 	log.Info("Network monitor: started")
 	for {
 		select {
@@ -50,10 +53,16 @@ func checkChange(ctx context.Context, nexthopv4, nexthopv6 systemops.Nexthop, ca
 				go callback()
 				return nil
 			case syscall.RTM_NEWLINK:
-				if (update.IfInfomsg.Flags&syscall.IFF_RUNNING) == 0 && update.Link.Attrs().OperState == netlink.OperDown {
-					log.Infof("Network monitor: monitored interface (%s) is down.", update.Link.Attrs().Name)
-					go callback()
-					return nil
+				isUp := (update.IfInfomsg.Flags&syscall.IFF_RUNNING) != 0 && update.Link.Attrs().OperState != netlink.OperDown
+				prevState, exists := interfaceStates[update.Index]
+
+				if !exists || prevState != isUp {
+					interfaceStates[update.Index] = isUp
+					if !isUp {
+						log.Infof("Network monitor: monitored interface (%s) is down.", update.Link.Attrs().Name)
+						go callback()
+						return nil
+					}
 				}
 			}
 
